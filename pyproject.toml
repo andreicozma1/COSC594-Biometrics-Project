@@ -9,10 +9,12 @@ description = "A simple Market-1501 person retrieval baseline"
 readme = "README.md"
 requires-python = "==3.12.*"
 dependencies = [
+  "matplotlib>=3.10,<4",
   "numpy>=2,<3",
   "pillow>=11,<13",
   "torch>=2.6,<3",
   "torchvision>=0.21,<1",
+  "torchreid",
 ]
 
 [project.scripts]
@@ -27,3 +29,14 @@ packages = ["src/reid_baseline"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 filterwarnings = ["ignore:Cython evaluation.*:UserWarning"]
+
+[tool.uv.sources]
+torchreid = { git = "https://github.com/KaiyangZhou/deep-person-reid.git", rev = "f8cd150fdf77e8d9e1ed143b7f308c2c609ded50" }
+
+# Upstream setup.py imports the package to read its version, so its runtime
+# imports must also be available in the isolated build environment.
+[tool.uv.extra-build-dependencies]
+torchreid = [
+  "numpy>=2,<3", "cython", "torch>=2.6,<3", "torchvision>=0.21,<1",
+  "pillow", "h5py", "six", "scipy", "opencv-python", "matplotlib", "tb-nightly", "gdown",
+]
