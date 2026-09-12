@@ -19,9 +19,9 @@ On macOS, installation may require Apple's Command Line Tools
 uv sync --locked
 ```
 
-Download Market-1501 from its official page above and extract it. The dataset
-root must contain `query/` and `bounding_box_test/`. Use the standard gallery,
-without the optional 500,000-image extension.
+Download [Market-1501](https://zheng-lab-anu.github.io/Project/project_reid.html)
+and extract it. The dataset root must contain `query/` and `bounding_box_test/`.
+Use the standard gallery, without the optional 500,000-image extension.
 
 Download either or both plain OSNet-x1.0 checkpoints from the
 [official model zoo](https://kaiyangzhou.github.io/deep-person-reid/MODEL_ZOO):
@@ -82,7 +82,7 @@ distance. Distance ties follow gallery filename order.
 
 The evaluation directory contains:
 
-- `metrics.json`: Rank-1/5/10, mAP, and evaluated and skipped query counts.
+- `metrics.json`: mAP, Rank-1/5/10, and evaluated and skipped query counts.
 - `per-query.json`: AP and the one-based first correct rank for every query, in
   query order.
 
@@ -108,3 +108,15 @@ Queries with no remaining same-ID images are reported as skipped.
 - Add test-time augmentation during extraction.
 - Consider using a stable distance sort so equal distances preserve gallery
   filename order.
+
+## Baseline result
+
+The [OSNet-x1.0 checkpoint trained on MSMT17 with `combineall`](https://drive.google.com/file/d/1IosIFlLiulGIjwW3H8uMRmx3MzPwf86x/view?usp=sharing)
+was evaluated on the standard query and gallery splits from
+[Market-1501](https://zheng-lab-anu.github.io/Project/project_reid.html). The
+gallery contained 15,913 images after excluding identity `-1`. All 3,368 queries
+had at least one remaining same-identity image from another camera.
+
+| Checkpoint | mAP | Rank-1 | Rank-5 | Rank-10 |
+| --- | ---: | ---: | ---: | ---: |
+| MSMT17-trained OSNet-x1.0 | 37.37% | 66.33% | 80.29% | 85.75% |
