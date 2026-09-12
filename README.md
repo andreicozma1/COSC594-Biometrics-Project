@@ -1,20 +1,56 @@
 # COSC594-Biometrics-Project
 
-A person retrieval baseline using pretrained **OSNet-x1.0** models from
-[Torchreid](https://github.com/KaiyangZhou/deep-person-reid). Extract embeddings,
-evaluate identity retrieval from the saved vectors, and compare checkpoints on
-the same Market-1501 split.
+This project builds a baseline for person re-identification across camera
+views. It compares pretrained models, measures retrieval accuracy, and tests
+how well learned visual features transfer between datasets and recording
+conditions.
 
-[Market-1501](https://zheng-lab-anu.github.io/Project/project_reid.html) is our
-first baseline dataset. More datasets are planned; the
-[contender dataset reference](docs/contender-datasets.md) supports their selection.
+## Project overview
+
+### Retrieval task
+
+Given an image of a person, the system ranks images from other cameras so that
+images of the same person appear first.
+
+### Data and modality
+
+The baseline uses full-body appearance in visible-light RGB images as its
+biometric modality. [Market-1501](https://zheng-lab-anu.github.io/Project/project_reid.html)
+is the first evaluation dataset. A checkpoint trained on Market-1501 provides a
+same-dataset reference, while checkpoints trained on other datasets measure
+cross-dataset transfer.
+
+Additional datasets would test whether the results extend beyond Market-1501
+and expand the evaluation to video, person search, aerial views, infrared
+imagery, gait, clothing changes, and multiple modalities. Candidates include
+MSMT17 and CUHK03 for image retrieval; MARS, LS-VID, and MEVID for video
+retrieval; and CUHK-SYSU and PRW for person search. The
+[contender dataset reference](docs/contender-datasets.md) records the complete
+set considered for training and evaluation.
+
+### Pipeline scope
+
+The baseline starts with pre-cropped person images and follows four stages:
+
+1. Preprocess the RGB person crops.
+2. Extract feature embeddings with pretrained **OSNet-x1.0** models from
+   [Torchreid](https://github.com/KaiyangZhou/deep-person-reid).
+3. Compare each query embedding with the gallery and rank the matches.
+4. Calculate retrieval metrics and inspect the ranked images.
+
+### Motivation
+
+Person re-identification connects observations across cameras that do not share
+a continuous field of view. Changes in viewpoint, pose, lighting, occlusion,
+image quality, and clothing can make the same person look different. Comparing
+checkpoints and datasets shows how well learned identity representations carry
+over to new recording conditions.
 
 ## Setup
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run
-from this project directory. The project uses Python 3.12 and locked dependencies.
-On macOS, installation may require Apple's Command Line Tools
-(`xcode-select --install`).
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/). The
+project uses Python 3.12 and locked dependencies. From the project directory,
+create the environment with:
 
 ```bash
 uv sync --locked
@@ -51,9 +87,6 @@ uv run reid-baseline extract \
   --output results/first-extraction
 ```
 
-Choose `osnet_x1_0`, `osnet_ibn_x1_0`, or `osnet_ain_x1_0` to match the
-checkpoint architecture.
-
 Images are read in filename order, converted to RGB, resized to **256 high × 128
 wide**, and normalized with ImageNet statistics. OSNet produces one
 512-dimensional float32 embedding per image in the same order as the saved
@@ -80,9 +113,11 @@ uv run reid-baseline evaluate \
   --output results/first-evaluation
 ```
 
-Evaluation uses squared Euclidean distance by default. Select cosine distance
-with `--distance cosine`; normalization is applied while scoring and does not
-change the saved embeddings. Distance ties follow gallery filename order.
+The available distance measures are `squared_euclidean` and `cosine`. Cosine
+distance can be selected with `--distance cosine`. It normalizes each embedding
+while calculating scores; the saved vectors remain unchanged. If two gallery
+images receive exactly the same distance score, they are ordered alphabetically
+by filename so repeated evaluations produce the same ranking.
 
 The evaluation directory contains:
 
@@ -97,7 +132,8 @@ and are excluded from averages.
 
 ### 3. Benchmark checkpoints
 
-Evaluate several checkpoints on Market-1501:
+Pass `--checkpoint` once per model. The command evaluates them in the supplied
+order and gives each checkpoint its own result directory:
 
 ```bash
 uv run reid-baseline benchmark \
@@ -163,9 +199,8 @@ Market-1501 held out for evaluation.
 
 ## TODOs
 
-- Try out various re-ranking algorithms.
-- Try out various test-time augmentation strategies during extraction.
+- Compare re-ranking algorithms.
+- Evaluate test-time augmentation strategies during extraction.
 - Evaluate PCA whitening fitted on training embeddings for cross-domain
   retrieval.
-- Consider using a stable distance sort so equal distances preserve gallery
-  filename order.
+- Define and test a stable policy for resolving equal distance scores.
