@@ -9,9 +9,18 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
+import torch
+from torchreid.metrics import compute_distance_matrix
 
-from .configuration import DEFAULT_BATCH_SIZE
+from .configuration import DEFAULT_BATCH_SIZE, DEFAULT_DISTANCE, DistanceMetric
 from .data import ImageRecord
+
+
+# Torchreid calls its squared Euclidean implementation "euclidean".
+_TORCHREID_METRIC = {
+    DistanceMetric.SQUARED_EUCLIDEAN: "euclidean",
+    DistanceMetric.COSINE: "cosine",
+}
 
 
 @dataclass(frozen=True)
@@ -51,11 +60,12 @@ class Evaluation:
     """Pair aggregate metrics with results for every input query.
 
     The queries list preserves input order, including queries that could not
-    be scored.
+    be scored. Distance records how those rankings were calculated.
     """
 
     metrics: EvaluationMetrics
     queries: list[QueryResult]
+    distance: DistanceMetric = DEFAULT_DISTANCE
 
 
 def validate_features(features: np.ndarray, count: int) -> None:
@@ -82,37 +92,64 @@ def squared_distances(queries: np.ndarray, gallery: np.ndarray) -> np.ndarray:
         gallery: Finite floating-point [M, D] matrix with the same width.
 
     Returns:
-        Float64 [N, M] distances. Inputs are not normalized or modified.
+        Float32 [N, M] distances. Inputs are not normalized or modified.
 
-    The caller limits query rows to bound temporary memory. Accumulation in
-    float64 reduces cancellation for nearby float32 vectors.
+    Torchreid names this calculation ``euclidean`` even though it omits the
+    square root. The caller limits query rows to bound temporary memory.
+    """
+    return pairwise_distances(queries, gallery, DistanceMetric.SQUARED_EUCLIDEAN)
+
+
+def pairwise_distances(
+    queries: np.ndarray,
+    gallery: np.ndarray,
+    metric: DistanceMetric = DEFAULT_DISTANCE,
+) -> np.ndarray:
+    """Compare every query embedding with every gallery embedding.
+
+    Args:
+        queries: Finite floating-point [N, D] matrix.
+        gallery: Finite floating-point [M, D] matrix with the same width.
+        metric: Squared Euclidean or cosine distance.
+
+    Returns:
+        Float32 [N, M] distances, where smaller values are better matches.
+
+    The calculation follows Torchreid's evaluation implementation. Its cosine
+    path applies L2 normalization with a small epsilon before matrix multiplication.
     """
     validate_features(queries, len(queries))
     validate_features(gallery, len(gallery))
     if queries.shape[1] != gallery.shape[1]:
         raise ValueError("Query and gallery embedding dimensions differ.")
-    gallery_vectors = gallery.astype(np.float64, copy=False)
-    gallery_norms = (gallery_vectors * gallery_vectors).sum(axis=1)[None, :]
-    return _distance_block(queries, gallery_vectors, gallery_norms)
+
+    return _distance_matrix(
+        torch.as_tensor(queries, dtype=torch.float32),
+        torch.as_tensor(gallery, dtype=torch.float32),
+        DistanceMetric(metric),
+    )
 
 
-def _distance_block(
-    queries: np.ndarray, gallery_vectors: np.ndarray, gallery_norms: np.ndarray
+def _distance_matrix(
+    queries: torch.Tensor,
+    gallery: torch.Tensor,
+    metric: DistanceMetric,
 ) -> np.ndarray:
-    """Compute squared distances against a prepared float64 gallery.
+    """Run Torchreid's distance calculation for one query block.
 
     Returns:
-        A nonnegative [query_count, gallery_count] array. Nonfinite arithmetic
-        raises ValueError; small negative roundoff is clamped to zero.
+        A float32 [query_count, gallery_count] NumPy array. Nonfinite arithmetic
+        raises ValueError before ranking.
     """
-    query_vectors = queries.astype(np.float64, copy=False)
-    query_norms = (query_vectors * query_vectors).sum(axis=1)[:, None]
-    distances = query_norms + gallery_norms - 2 * (query_vectors @ gallery_vectors.T)
-    if not np.isfinite(distances).all():
-        raise ValueError("Distance calculation produced nonfinite values.")
+    result = compute_distance_matrix(
+        queries,
+        gallery,
+        metric=_TORCHREID_METRIC[metric],
+    ).numpy()
 
-    # Roundoff can make a mathematically zero squared distance slightly negative.
-    return np.maximum(distances, 0)
+    if not np.isfinite(result).all():
+        raise ValueError("Distance calculation produced nonfinite values.")
+    return result
 
 
 def eligible_gallery_indices(query: ImageRecord, gallery: Sequence[ImageRecord]) -> np.ndarray:
@@ -176,6 +213,7 @@ def evaluate(
     query_features: np.ndarray,
     gallery_features: np.ndarray,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    distance: DistanceMetric = DEFAULT_DISTANCE,
 ) -> Evaluation:
     """Evaluate query embeddings against the full filtered gallery.
 
@@ -185,6 +223,7 @@ def evaluate(
         query_features: Floating-point [query_count, D] embedding matrix.
         gallery_features: Floating-point [gallery_count, D] embedding matrix.
         batch_size: Maximum queries per distance block; must be positive.
+        distance: Measure used to rank each query against the gallery.
 
     Returns:
         Aggregate metrics and a result for every query. Queries with no eligible
@@ -203,19 +242,26 @@ def evaluate(
     if query_features.shape[1] != gallery_features.shape[1]:
         raise ValueError("Query and gallery embedding dimensions differ.")
 
-    # The same gallery serves every query batch; prepare it only once.
-    gallery_vectors = gallery_features.astype(np.float64, copy=False)
-    gallery_norms = (gallery_vectors * gallery_vectors).sum(axis=1)[None, :]
+    distance = DistanceMetric(distance)
+
+    # The same tensor serves every query batch, avoiding repeated gallery copies.
+    gallery_tensor = torch.as_tensor(gallery_features, dtype=torch.float32)
     results: list[QueryResult] = []
     for start in range(0, len(queries), batch_size):
-        block = _distance_block(
-            query_features[start : start + batch_size], gallery_vectors, gallery_norms
+        query_tensor = torch.as_tensor(
+            query_features[start : start + batch_size],
+            dtype=torch.float32,
+        )
+        block = _distance_matrix(
+            query_tensor,
+            gallery_tensor,
+            distance,
         )
         for offset, distances in enumerate(block):
             query = queries[start + offset]
             results.append(_evaluate_query(query, gallery, distances))
 
-    return Evaluation(_aggregate_metrics(results), results)
+    return Evaluation(_aggregate_metrics(results), results, distance)
 
 
 def _evaluate_query(

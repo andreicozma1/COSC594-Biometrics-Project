@@ -1,4 +1,4 @@
-"""Load local OSNet-x1.0 weights and turn person crops into embeddings.
+"""Load local OSNet weights and turn person crops into embeddings.
 
 Model loading:
     Read checkpoints on CPU, discard the training classifier, and require the
@@ -17,10 +17,17 @@ import torch
 from numpy.typing import NDArray
 from PIL import Image
 from torch import nn
-from torchreid.models.osnet import osnet_x1_0
+from torchreid.models import build_model
 from torchvision import transforms
 
-from .configuration import DEFAULT_BATCH_SIZE, EMBEDDING_DIM, PREPROCESSING, DeviceName
+from .configuration import (
+    DEFAULT_ARCHITECTURE,
+    DEFAULT_BATCH_SIZE,
+    EMBEDDING_DIM,
+    PREPROCESSING,
+    DeviceName,
+    ModelArchitecture,
+)
 from .data import ImageRecord
 
 
@@ -148,13 +155,18 @@ def _embedding_weights(
     return weights
 
 
-def load_model(checkpoint: Path, device: torch.device) -> nn.Module:
-    """Load a local OSNet-x1.0 checkpoint for embedding extraction.
+def load_model(
+    checkpoint: Path,
+    device: torch.device,
+    architecture: ModelArchitecture = DEFAULT_ARCHITECTURE,
+) -> nn.Module:
+    """Load a local OSNet checkpoint for embedding extraction.
 
     Args:
         checkpoint: Local file containing a raw state dictionary or a checkpoint
             with a state_dict entry. The unused classifier may be omitted.
         device: Backend on which the returned model will run.
+        architecture: Torchreid model definition matching the saved parameters.
 
     Returns:
         A float32 model in evaluation mode. Automatic weight downloads are disabled.
@@ -162,13 +174,13 @@ def load_model(checkpoint: Path, device: torch.device) -> nn.Module:
     Raises:
         FileNotFoundError: The checkpoint file is missing.
         ValueError: The checkpoint cannot be read or its embedding parameters do
-            not match OSNet-x1.0.
+            not match the selected OSNet architecture.
         RuntimeError: PyTorch cannot move the model to the requested device.
     """
     checkpoint = checkpoint.expanduser().resolve()
 
-    # OSNet requires a class count at construction, but retrieval uses no classifier.
-    model = osnet_x1_0(num_classes=1, pretrained=False)
+    # Torchreid requires a class count at construction; retrieval removes the head.
+    model = build_model(architecture, num_classes=1, pretrained=False)
     model.set_submodule("classifier", nn.Identity(), strict=True)
     weights = _embedding_weights(_read_checkpoint(checkpoint), model, checkpoint)
 

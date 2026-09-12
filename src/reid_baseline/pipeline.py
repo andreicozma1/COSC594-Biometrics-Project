@@ -47,7 +47,7 @@ def extract(options: ExtractionOptions) -> None:
     dataset = load_market1501(options.dataset_root)
     device = select_device(options.device)
     checkpoint = options.checkpoint.expanduser().resolve()
-    model = load_model(checkpoint, device)
+    model = load_model(checkpoint, device, options.architecture)
 
     # The filename alone does not identify which weights produced the vectors.
     with checkpoint.open("rb") as handle:
@@ -70,6 +70,7 @@ def extract(options: ExtractionOptions) -> None:
         device=str(device),
         batch_size=options.batch_size,
         extraction_seconds=perf_counter() - started,
+        model=options.architecture,
     )
     save_embeddings(output, dataset, query, gallery, settings)
     print(f"Saved embeddings and metadata: {output}", flush=True)
@@ -100,6 +101,7 @@ def evaluate_extraction(options: EmbeddingEvaluationOptions) -> None:
         extraction.query_features,
         extraction.gallery_features,
         options.batch_size,
+        options.distance,
     )
     # Invalid inputs and unscorable queries should not leave an empty output directory.
     output.mkdir(parents=True, exist_ok=False)

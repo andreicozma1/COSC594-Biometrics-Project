@@ -15,7 +15,6 @@ from numpy.typing import NDArray
 from .configuration import (
     EMBEDDING_DIM,
     EMBEDDING_DTYPE,
-    MODEL_NAME,
     ExtractionSettings,
 )
 from .data import ImageRecord, Market1501, MarketSplit, parse_filename
@@ -199,12 +198,11 @@ def load_extraction(directory: Path) -> SavedExtraction:
             raise ValueError("Extraction settings must be a JSON object.")
         settings = ExtractionSettings.from_mapping(settings_data)
         if (
-            settings.model != MODEL_NAME
-            or settings.dtype != EMBEDDING_DTYPE
+            settings.dtype != EMBEDDING_DTYPE
             or settings.embedding_dimensions != EMBEDDING_DIM
             or settings.feature_normalization is not False
         ):
-            raise ValueError("Expected unnormalized float32 OSNet-x1.0 extraction settings.")
+            raise ValueError("Expected unnormalized float32 OSNet extraction settings.")
 
         metadata = json.loads((directory / "images.json").read_text())
         queries = _read_records(metadata["query"], MarketSplit.QUERY)
@@ -220,12 +218,17 @@ def save_metrics(directory: Path, evaluation: Evaluation) -> None:
 
     Args:
         directory: Existing directory; metrics.json and per-query.json must be new.
-        evaluation: Metric fractions and query results in input order.
+        evaluation: Distance measure, metric fractions, and query results in
+            input order.
 
     Skipped queries have null AP and first_match_rank values. Serialization is
     completed before either file is opened; I/O errors may leave partial output.
     """
-    metrics_json = json.dumps(asdict(evaluation.metrics), indent=2, allow_nan=False) + "\n"
+    metric_values = {
+        "distance": evaluation.distance,
+        **asdict(evaluation.metrics),
+    }
+    metrics_json = json.dumps(metric_values, indent=2, allow_nan=False) + "\n"
     queries_json = json.dumps(
         [asdict(result) for result in evaluation.queries], indent=2, allow_nan=False
     ) + "\n"

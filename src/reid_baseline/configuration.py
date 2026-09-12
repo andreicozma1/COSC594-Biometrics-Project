@@ -13,7 +13,33 @@ from typing import Any, Self
 DEFAULT_BATCH_SIZE = 64
 EMBEDDING_DIM = 512
 EMBEDDING_DTYPE = "float32"
-MODEL_NAME = "osnet_x1_0"
+
+
+class ModelArchitecture(StrEnum):
+    """Name the OSNet architecture that owns a checkpoint's parameters.
+
+    The value is passed directly to Torchreid's model registry and saved with
+    the extracted vectors so the checkpoint can be identified later.
+    """
+
+    OSNET_X1_0 = "osnet_x1_0"
+    OSNET_IBN_X1_0 = "osnet_ibn_x1_0"
+    OSNET_AIN_X1_0 = "osnet_ain_x1_0"
+
+
+class DistanceMetric(StrEnum):
+    """Select how query and gallery embeddings are compared.
+
+    Both measures treat smaller values as better matches. Cosine distance
+    normalizes vectors during evaluation; it does not change saved embeddings.
+    """
+
+    SQUARED_EUCLIDEAN = "squared_euclidean"
+    COSINE = "cosine"
+
+
+DEFAULT_ARCHITECTURE = ModelArchitecture.OSNET_X1_0
+DEFAULT_DISTANCE = DistanceMetric.SQUARED_EUCLIDEAN
 
 
 class DeviceName(StrEnum):
@@ -38,8 +64,9 @@ class ExtractionOptions:
 
     Attributes:
         dataset_root: Folder containing query/ and bounding_box_test/.
-        checkpoint: Local OSNet-x1.0 weights; no download is performed.
+        checkpoint: Local OSNet weights; no download is performed.
         output: New directory for the arrays and metadata.
+        architecture: Model definition used to interpret the checkpoint.
         device: Requested backend, resolved when extraction starts.
         batch_size: Maximum images per inference batch; the CLI requires at least 1.
     """
@@ -47,6 +74,7 @@ class ExtractionOptions:
     dataset_root: Path
     checkpoint: Path
     output: Path
+    architecture: ModelArchitecture = DEFAULT_ARCHITECTURE
     device: DeviceName = DeviceName.AUTO
     batch_size: int = DEFAULT_BATCH_SIZE
 
@@ -59,11 +87,13 @@ class EmbeddingEvaluationOptions:
         extraction: Directory containing embeddings, image records, and settings.
         output: New directory for aggregate and per-query JSON results.
         batch_size: Maximum query rows per distance block.
+        distance: Measure used to rank gallery embeddings for each query.
     """
 
     extraction: Path
     output: Path
     batch_size: int = DEFAULT_BATCH_SIZE
+    distance: DistanceMetric = DEFAULT_DISTANCE
 
 
 @dataclass(frozen=True)
@@ -114,7 +144,7 @@ class ExtractionSettings:
     batch_size: int
     extraction_seconds: float
     preprocessing: PreprocessingSettings = PREPROCESSING
-    model: str = MODEL_NAME
+    model: ModelArchitecture = DEFAULT_ARCHITECTURE
     dtype: str = EMBEDDING_DTYPE
     embedding_dimensions: int = EMBEDDING_DIM
     feature_normalization: bool = False
@@ -133,4 +163,5 @@ class ExtractionSettings:
             raise TypeError("preprocessing must be a JSON object")
 
         settings["preprocessing"] = PreprocessingSettings(**dict(preprocessing))
+        settings["model"] = ModelArchitecture(settings["model"])
         return cls(**settings)

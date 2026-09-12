@@ -11,8 +11,10 @@ from pathlib import Path
 from .configuration import (
     DEFAULT_BATCH_SIZE,
     DeviceName,
+    DistanceMetric,
     EmbeddingEvaluationOptions,
     ExtractionOptions,
+    ModelArchitecture,
 )
 from .pipeline import evaluate_extraction, extract
 
@@ -46,6 +48,12 @@ def _parser() -> argparse.ArgumentParser:
     # Input paths and output location.
     extract.add_argument("--dataset-root", type=Path, required=True)
     extract.add_argument("--checkpoint", type=Path, required=True)
+    extract.add_argument(
+        "--architecture",
+        type=ModelArchitecture,
+        choices=list(ModelArchitecture),
+        default=ModelArchitecture.OSNET_X1_0,
+    )
     extract.add_argument("--output", type=Path, required=True, help="New output directory.")
 
     # Runtime choices apply to both splits.
@@ -65,6 +73,12 @@ def _parser() -> argparse.ArgumentParser:
         "--output", type=Path, required=True, help="New result directory; must not already exist."
     )
     evaluation.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    evaluation.add_argument(
+        "--distance",
+        type=DistanceMetric,
+        choices=list(DistanceMetric),
+        default=DistanceMetric.SQUARED_EUCLIDEAN,
+    )
 
     return parser
 
@@ -93,13 +107,19 @@ def main(argv: list[str] | None = None) -> int:
                     dataset_root=args.dataset_root,
                     checkpoint=args.checkpoint,
                     output=args.output,
+                    architecture=args.architecture,
                     device=args.device,
                     batch_size=args.batch_size,
                 )
             )
         elif args.command is Command.EVALUATE:
             evaluate_extraction(
-                EmbeddingEvaluationOptions(args.extraction, args.output, args.batch_size)
+                EmbeddingEvaluationOptions(
+                    extraction=args.extraction,
+                    output=args.output,
+                    batch_size=args.batch_size,
+                    distance=args.distance,
+                )
             )
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

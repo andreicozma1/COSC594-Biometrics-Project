@@ -48,8 +48,12 @@ output directory must be new:
 uv run reid-baseline extract \
   --dataset-root /path/to/Market-1501-v15.09.15 \
   --checkpoint /path/to/checkpoint.pth \
+  --architecture osnet_x1_0 \
   --output results/first-extraction
 ```
+
+Choose `osnet_x1_0`, `osnet_ibn_x1_0`, or `osnet_ain_x1_0` to match the
+checkpoint architecture.
 
 Images are read in filename order, converted to RGB, resized to **256 high × 128
 wide**, and normalized with ImageNet statistics. OSNet produces one
@@ -77,12 +81,14 @@ uv run reid-baseline evaluate \
   --output results/first-evaluation
 ```
 
-Evaluation ranks the saved OSNet outputs directly using squared Euclidean
-distance. Distance ties follow gallery filename order.
+Evaluation uses squared Euclidean distance by default. Select cosine distance
+with `--distance cosine`; normalization is applied while scoring and does not
+change the saved embeddings. Distance ties follow gallery filename order.
 
 The evaluation directory contains:
 
-- `metrics.json`: mAP, Rank-1/5/10, and evaluated and skipped query counts.
+- `metrics.json`: the distance measure, mAP, Rank-1/5/10, and evaluated and
+  skipped query counts.
 - `per-query.json`: AP and the one-based first correct rank for every query, in
   query order.
 
