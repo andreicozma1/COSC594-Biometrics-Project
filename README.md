@@ -191,11 +191,15 @@ Market-1501 held out for evaluation.
 
 | Checkpoint | Training data | Distance | mAP | Rank-1 | Rank-5 | Rank-10 |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
-| OSNet-x1.0 | Market-1501 | Squared Euclidean | Pending | Pending | Pending | Pending |
+| OSNet-x1.0 | Market-1501 | Squared Euclidean | 82.55% | 94.36% | 97.83% | 98.60% |
 | OSNet-x1.0 | MSMT17 | Squared Euclidean | 37.37% | 66.33% | 80.29% | 85.75% |
-| OSNet-AIN-x1.0 | MSMT17 | Cosine | Pending | Pending | Pending | Pending |
-| OSNet-x1.0 | MS+D+C | Cosine | Pending | Pending | Pending | Pending |
-| OSNet-AIN-x1.0 | MS+D+C | Cosine | Pending | Pending | Pending | Pending |
+| OSNet-AIN-x1.0 | MSMT17 | Cosine | 43.28% | 69.83% | 83.97% | 88.45% |
+| OSNet-x1.0 | MS+D+C | Cosine | 44.30% | 72.62% | 85.93% | 90.38% |
+| OSNet-AIN-x1.0 | MS+D+C | Cosine | 45.80% | 73.01% | 86.55% | 90.50% |
+
+All five runs evaluated 3,368 queries against 15,913 gallery images after junk
+removal, with no skipped queries. Compared with the official rounded values,
+mAP differs by at most 0.13 percentage points and Rank-1 by at most 0.29 points.
 
 ## TODOs
 
