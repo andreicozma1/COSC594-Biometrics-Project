@@ -97,6 +97,40 @@ class EmbeddingEvaluationOptions:
 
 
 @dataclass(frozen=True)
+class CheckpointSpec:
+    """Describe one checkpoint included in a benchmark.
+
+    Attributes:
+        path: Local checkpoint file.
+        architecture: OSNet model definition used to load its parameters.
+        distance: Measure used to rank its saved embeddings.
+    """
+
+    path: Path
+    architecture: ModelArchitecture = DEFAULT_ARCHITECTURE
+    distance: DistanceMetric = DEFAULT_DISTANCE
+
+
+@dataclass(frozen=True)
+class BenchmarkOptions:
+    """Collect inputs shared by a multi-checkpoint benchmark.
+
+    Attributes:
+        dataset_root: Market-1501 directory used for every checkpoint.
+        checkpoints: Models evaluated in command-line order.
+        output: New directory containing one subdirectory per checkpoint.
+        device: Inference backend shared by all checkpoints.
+        batch_size: Maximum images or queries processed in one batch.
+    """
+
+    dataset_root: Path
+    checkpoints: tuple[CheckpointSpec, ...]
+    output: Path
+    device: DeviceName = DeviceName.AUTO
+    batch_size: int = DEFAULT_BATCH_SIZE
+
+
+@dataclass(frozen=True)
 class PreprocessingSettings:
     """Describe the reference resize and channel normalization.
 

@@ -15,10 +15,61 @@ from numpy.typing import NDArray
 from .configuration import (
     EMBEDDING_DIM,
     EMBEDDING_DTYPE,
+    CheckpointSpec,
+    DistanceMetric,
     ExtractionSettings,
+    ModelArchitecture,
 )
 from .data import ImageRecord, Market1501, MarketSplit, parse_filename
 from .evaluation import Evaluation
+
+
+@dataclass(frozen=True)
+class BenchmarkResult:
+    """Summarize one checkpoint in ``comparison.json``.
+
+    The checkpoint and directory fields identify the saved files. Metric values
+    are fractions, and elapsed_seconds covers extraction, evaluation, and saving.
+    """
+
+    checkpoint: str
+    directory: str
+    architecture: ModelArchitecture
+    distance: DistanceMetric
+    mAP: float
+    rank1: float
+    rank5: float
+    rank10: float
+    total_queries: int
+    valid_queries: int
+    skipped_queries: int
+    elapsed_seconds: float
+
+    @classmethod
+    def from_evaluation(
+        cls,
+        checkpoint: CheckpointSpec,
+        evaluation: Evaluation,
+        elapsed_seconds: float,
+    ) -> "BenchmarkResult":
+        """Build a comparison row from one completed checkpoint evaluation.
+
+        Args:
+            checkpoint: Weight file and the options used to evaluate it.
+            evaluation: Aggregate Market-1501 scores for the checkpoint.
+            elapsed_seconds: Total checkpoint processing time.
+
+        Returns:
+            A serializable result that identifies the checkpoint and its scores.
+        """
+        return cls(
+            checkpoint=checkpoint.path.name,
+            directory=checkpoint.path.stem,
+            architecture=checkpoint.architecture,
+            distance=evaluation.distance,
+            **asdict(evaluation.metrics),
+            elapsed_seconds=elapsed_seconds,
+        )
 
 
 @dataclass(frozen=True)
@@ -112,13 +163,17 @@ def _read_records(rows: list[dict[str, Any]], split: MarketSplit) -> list[ImageR
         if path.parts != (split.value, path.name):
             raise ValueError(f"Invalid saved image path: {item.path}")
         if parse_filename(item.filename) != (item.pid, item.camera):
-            raise ValueError(f"Saved image labels disagree with filename: {item.filename}")
+            raise ValueError(
+                f"Saved image labels disagree with filename: {item.filename}"
+            )
         if item.pid < 0 or (split is MarketSplit.QUERY and item.pid == 0):
             raise ValueError(f"Invalid saved identity: {item.filename}")
     # Metadata order is the only link between an image and its saved vector row.
     names = [item.filename for item in records]
     if not records or names != sorted(set(names)):
-        raise ValueError(f"Saved {split.value} records must be nonempty, unique, and sorted.")
+        raise ValueError(
+            f"Saved {split.value} records must be nonempty, unique, and sorted."
+        )
     return records
 
 
@@ -139,7 +194,9 @@ def _validate_saved_embeddings(features: np.ndarray, count: int, split: str) -> 
             f"{split} embeddings have shape {features.shape}; expected {expected_shape}."
         )
     if features.dtype != np.float32:
-        raise ValueError(f"{split} embeddings have dtype {features.dtype}; expected float32.")
+        raise ValueError(
+            f"{split} embeddings have dtype {features.dtype}; expected float32."
+        )
     if not np.isfinite(features).all():
         raise ValueError(f"{split} embeddings contain NaN or infinity.")
 
@@ -229,10 +286,36 @@ def save_metrics(directory: Path, evaluation: Evaluation) -> None:
         **asdict(evaluation.metrics),
     }
     metrics_json = json.dumps(metric_values, indent=2, allow_nan=False) + "\n"
-    queries_json = json.dumps(
-        [asdict(result) for result in evaluation.queries], indent=2, allow_nan=False
-    ) + "\n"
+    queries_json = (
+        json.dumps(
+            [asdict(result) for result in evaluation.queries], indent=2, allow_nan=False
+        )
+        + "\n"
+    )
     with (directory / "metrics.json").open("x") as handle:
         handle.write(metrics_json)
     with (directory / "per-query.json").open("x") as handle:
         handle.write(queries_json)
+
+
+def save_comparison(directory: Path, results: list[BenchmarkResult]) -> None:
+    """Write ordered checkpoint summaries to ``comparison.json``.
+
+    Args:
+        directory: Benchmark directory; comparison.json must not already exist.
+        results: Completed checkpoints in the order supplied to the command.
+
+    Raises:
+        ValueError: A result contains a nonfinite number.
+        OSError: The destination exists or cannot be written.
+    """
+    contents = (
+        json.dumps(
+            {"results": [asdict(result) for result in results]},
+            indent=2,
+            allow_nan=False,
+        )
+        + "\n"
+    )
+    with (directory / "comparison.json").open("x") as handle:
+        handle.write(contents)

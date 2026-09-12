@@ -1,6 +1,6 @@
-"""Parse commands for embedding extraction and saved-embedding evaluation.
+"""Parse commands for extraction, evaluation, and checkpoint benchmarking.
 
-Both commands report errors to stderr and require explicit output paths.
+Every command reports errors to stderr and requires an explicit output path.
 """
 
 import argparse
@@ -9,6 +9,8 @@ from enum import StrEnum
 from pathlib import Path
 
 from .configuration import (
+    BenchmarkOptions,
+    CheckpointSpec,
     DEFAULT_BATCH_SIZE,
     DeviceName,
     DistanceMetric,
@@ -16,7 +18,7 @@ from .configuration import (
     ExtractionOptions,
     ModelArchitecture,
 )
-from .pipeline import evaluate_extraction, extract
+from .pipeline import benchmark, evaluate_extraction, extract
 
 
 class Command(StrEnum):
@@ -27,14 +29,41 @@ class Command(StrEnum):
 
     EXTRACT = "extract"
     EVALUATE = "evaluate"
+    BENCHMARK = "benchmark"
+
+
+def _checkpoint_spec(values: list[str]) -> CheckpointSpec:
+    """Parse one checkpoint supplied to the benchmark command.
+
+    A path by itself uses the default architecture and distance. Three values
+    specify the path, architecture, and distance in that order.
+
+    Args:
+        values: A path alone, or a path followed by architecture and distance.
+
+    Returns:
+        Typed checkpoint settings with defaults filled when only a path is given.
+
+    Raises:
+        ValueError: The group has the wrong length or names an unsupported option.
+    """
+    if len(values) == 1:
+        return CheckpointSpec(Path(values[0]))
+    if len(values) == 3:
+        return CheckpointSpec(
+            Path(values[0]),
+            ModelArchitecture(values[1]),
+            DistanceMetric(values[2]),
+        )
+    raise ValueError("Each --checkpoint requires PATH or PATH ARCHITECTURE DISTANCE.")
 
 
 def _parser() -> argparse.ArgumentParser:
-    """Build the extraction and evaluation parsers.
+    """Build parsers for the three supported commands.
 
     Returns:
-        A parser requiring a command and that command's paths. Batch-size
-        validation happens in main after argparse converts the input.
+        A parser requiring one command and its paths. ``main`` validates batch
+        sizes and grouped checkpoint settings after argparse converts them.
     """
     parser = argparse.ArgumentParser(
         description="Extract embeddings and evaluate OSNet-x1.0 person retrieval on Market-1501."
@@ -54,7 +83,9 @@ def _parser() -> argparse.ArgumentParser:
         choices=list(ModelArchitecture),
         default=ModelArchitecture.OSNET_X1_0,
     )
-    extract.add_argument("--output", type=Path, required=True, help="New output directory.")
+    extract.add_argument(
+        "--output", type=Path, required=True, help="New output directory."
+    )
 
     # Runtime choices apply to both splits.
     extract.add_argument(
@@ -70,7 +101,10 @@ def _parser() -> argparse.ArgumentParser:
         "--extraction", type=Path, required=True, help="Directory written by extract."
     )
     evaluation.add_argument(
-        "--output", type=Path, required=True, help="New result directory; must not already exist."
+        "--output",
+        type=Path,
+        required=True,
+        help="New result directory; must not already exist.",
     )
     evaluation.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     evaluation.add_argument(
@@ -79,6 +113,31 @@ def _parser() -> argparse.ArgumentParser:
         choices=list(DistanceMetric),
         default=DistanceMetric.SQUARED_EUCLIDEAN,
     )
+
+    benchmark_parser = commands.add_parser(
+        Command.BENCHMARK,
+        help="Extract and evaluate one or more checkpoints.",
+    )
+    benchmark_parser.set_defaults(command=Command.BENCHMARK)
+    benchmark_parser.add_argument("--dataset-root", type=Path, required=True)
+    benchmark_parser.add_argument(
+        "--checkpoint",
+        action="append",
+        nargs="+",
+        required=True,
+        metavar="CHECKPOINT",
+        help=(
+            "PATH, or PATH ARCHITECTURE DISTANCE; repeat to benchmark "
+            "additional checkpoints."
+        ),
+    )
+    benchmark_parser.add_argument(
+        "--output", type=Path, required=True, help="New benchmark directory."
+    )
+    benchmark_parser.add_argument(
+        "--device", type=DeviceName, choices=list(DeviceName), default=DeviceName.AUTO
+    )
+    benchmark_parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
 
     return parser
 
@@ -97,30 +156,48 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = _parser()
     args = parser.parse_args(argv)
-    if args.command in {Command.EXTRACT, Command.EVALUATE} and args.batch_size < 1:
+    if args.batch_size < 1:
         parser.error("--batch-size must be a positive integer")
 
     try:
-        if args.command is Command.EXTRACT:
-            extract(
-                ExtractionOptions(
-                    dataset_root=args.dataset_root,
-                    checkpoint=args.checkpoint,
-                    output=args.output,
-                    architecture=args.architecture,
-                    device=args.device,
-                    batch_size=args.batch_size,
+        match args.command:
+            case Command.EXTRACT:
+                extract(
+                    ExtractionOptions(
+                        dataset_root=args.dataset_root,
+                        checkpoint=args.checkpoint,
+                        output=args.output,
+                        architecture=args.architecture,
+                        device=args.device,
+                        batch_size=args.batch_size,
+                    )
                 )
-            )
-        elif args.command is Command.EVALUATE:
-            evaluate_extraction(
-                EmbeddingEvaluationOptions(
-                    extraction=args.extraction,
-                    output=args.output,
-                    batch_size=args.batch_size,
-                    distance=args.distance,
+            case Command.EVALUATE:
+                evaluate_extraction(
+                    EmbeddingEvaluationOptions(
+                        extraction=args.extraction,
+                        output=args.output,
+                        batch_size=args.batch_size,
+                        distance=args.distance,
+                    )
                 )
-            )
+            case Command.BENCHMARK:
+                try:
+                    checkpoints = tuple(
+                        _checkpoint_spec(values) for values in args.checkpoint
+                    )
+                except ValueError as exc:
+                    parser.error(str(exc))
+
+                benchmark(
+                    BenchmarkOptions(
+                        dataset_root=args.dataset_root,
+                        checkpoints=checkpoints,
+                        output=args.output,
+                        device=args.device,
+                        batch_size=args.batch_size,
+                    )
+                )
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2

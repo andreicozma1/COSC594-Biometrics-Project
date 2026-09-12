@@ -2,7 +2,8 @@
 
 A person retrieval baseline using pretrained **OSNet-x1.0** models from
 [Torchreid](https://github.com/KaiyangZhou/deep-person-reid). Extract embeddings,
-then evaluate identity retrieval from the saved vectors.
+evaluate identity retrieval from the saved vectors, and compare checkpoints on
+the same Market-1501 split.
 
 [Market-1501](https://zheng-lab-anu.github.io/Project/project_reid.html) is our
 first baseline dataset. More datasets are planned; the
@@ -31,13 +32,11 @@ Download either or both plain OSNet-x1.0 checkpoints from the
 
 ## Commands
 
-The saved-embedding workflow runs in two steps:
+Use either workflow:
 
-1. Extract reusable embeddings and image metadata from Market-1501.
-2. Evaluate the saved embeddings and write retrieval metrics.
-
-The commands process one checkpoint at a time. Repeat both steps with separate
-output directories for each checkpoint you want to compare.
+1. Run `extract`, then `evaluate`, to work with one checkpoint and reuse its
+   saved embeddings.
+2. Run `benchmark` to extract and evaluate multiple checkpoints together.
 
 ### 1. Extract embeddings
 
@@ -95,6 +94,33 @@ The evaluation directory contains:
 Metrics are saved as fractions and printed as percentages. Queries with no
 same-identity gallery image after filtering have `null` AP and first-rank values
 and are excluded from averages.
+
+### 3. Benchmark checkpoints
+
+Evaluate several checkpoints on Market-1501:
+
+```bash
+uv run reid-baseline benchmark \
+  --dataset-root /path/to/Market-1501-v15.09.15 \
+  --checkpoint /path/to/market-checkpoint.pth \
+  --checkpoint /path/to/msmt-ain-checkpoint.pth osnet_ain_x1_0 cosine \
+  --output results/first-benchmark
+```
+
+Checkpoint options:
+
+- Repeat `--checkpoint` for each model.
+- `--checkpoint PATH` uses `osnet_x1_0` and `squared_euclidean`.
+- `--checkpoint PATH ARCHITECTURE DISTANCE` sets both values explicitly.
+  Supported architectures are `osnet_x1_0`, `osnet_ibn_x1_0`, and
+  `osnet_ain_x1_0`. Supported distances are `squared_euclidean` and `cosine`.
+- Checkpoint filenames must have unique stems because each stem names its result
+  directory.
+
+Outputs:
+
+- `<checkpoint>/`: the extraction and evaluation files described above.
+- `comparison.json`: metrics for all checkpoints in the benchmark.
 
 ## Evaluation protocol
 
