@@ -133,22 +133,39 @@ Queries with no remaining same-ID images are reported as skipped.
 - **AP:** precision averaged at each correct match in a query's full ranking.
 - **mAP:** mean AP across evaluated queries.
 
-## Planned work
+## Benchmark results
 
-- Add optional feature normalization.
-- Add re-ranking.
-- Add test-time augmentation during extraction.
+### Official reference
+
+These Market-1501 results and checkpoint downloads come from the
+[Torchreid model zoo](https://kaiyangzhou.github.io/deep-person-reid/MODEL_ZOO).
+
+| Checkpoint | Training data | mAP | Rank-1 |
+| --- | --- | ---: | ---: |
+| [OSNet-x1.0](https://drive.google.com/file/d/1vduhq5DpN2q1g4fYEZfPI17MJeh9qyrA/view?usp=sharing) | Market-1501 | 82.60% | 94.20% |
+| [OSNet-x1.0](https://drive.google.com/file/d/1IosIFlLiulGIjwW3H8uMRmx3MzPwf86x/view?usp=sharing) | MSMT17 | 37.50% | 66.60% |
+| [OSNet-AIN-x1.0](https://drive.google.com/file/d/1SigwBE6mPdqiJMqhuIY4aqC7--5CsMal/view?usp=sharing) | MSMT17 | 43.30% | 70.10% |
+| [OSNet-x1.0](https://drive.google.com/file/d/1QeQ4WC3i8YGb7Pzd5EX6kHLUUIoGIU_Z/view?usp=sharing) | MS+D+C | 44.20% | 72.50% |
+| [OSNet-AIN-x1.0](https://drive.google.com/file/d/1nIrszJVYSHf3Ej8-j6DTFdWz8EnO42PB/view?usp=sharing) | MS+D+C | 45.80% | 73.30% |
+
+`MS+D+C` combines MSMT17, DukeMTMC-reID, and CUHK03 for training, with
+Market-1501 held out for evaluation.
+
+### Our results
+
+| Checkpoint | Training data | Distance | mAP | Rank-1 | Rank-5 | Rank-10 |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| OSNet-x1.0 | Market-1501 | Squared Euclidean | Pending | Pending | Pending | Pending |
+| OSNet-x1.0 | MSMT17 | Squared Euclidean | 37.37% | 66.33% | 80.29% | 85.75% |
+| OSNet-AIN-x1.0 | MSMT17 | Cosine | Pending | Pending | Pending | Pending |
+| OSNet-x1.0 | MS+D+C | Cosine | Pending | Pending | Pending | Pending |
+| OSNet-AIN-x1.0 | MS+D+C | Cosine | Pending | Pending | Pending | Pending |
+
+## TODOs
+
+- Try out various re-ranking algorithms.
+- Try out various test-time augmentation strategies during extraction.
+- Evaluate PCA whitening fitted on training embeddings for cross-domain
+  retrieval.
 - Consider using a stable distance sort so equal distances preserve gallery
   filename order.
-
-## Baseline result
-
-The [OSNet-x1.0 checkpoint trained on MSMT17 with `combineall`](https://drive.google.com/file/d/1IosIFlLiulGIjwW3H8uMRmx3MzPwf86x/view?usp=sharing)
-was evaluated on the standard query and gallery splits from
-[Market-1501](https://zheng-lab-anu.github.io/Project/project_reid.html). The
-gallery contained 15,913 images after excluding identity `-1`. All 3,368 queries
-had at least one remaining same-identity image from another camera.
-
-| Checkpoint | mAP | Rank-1 | Rank-5 | Rank-10 |
-| --- | ---: | ---: | ---: | ---: |
-| MSMT17-trained OSNet-x1.0 | 37.37% | 66.33% | 80.29% | 85.75% |
