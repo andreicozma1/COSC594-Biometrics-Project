@@ -1,21 +1,19 @@
-"""Define the arguments and settings used by embedding extraction.
+"""Define command inputs and the settings saved with extracted embeddings.
 
-Configuration:
-    ExtractionOptions holds command inputs. ExtractionSettings records the
-    checkpoint and inference settings written to settings.json.
-
-Preprocessing:
-    PREPROCESSING supplies the resize and normalization values to both the
-    image transform and saved metadata.
+Extraction and evaluation share a batch-size default. Preprocessing settings
+describe the image transform used before the vectors are saved.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Any, Self
 
-# Batch size is a runtime default; embedding width is fixed by OSNet-x1.0.
 DEFAULT_BATCH_SIZE = 64
 EMBEDDING_DIM = 512
+EMBEDDING_DTYPE = "float32"
+MODEL_NAME = "osnet_x1_0"
 
 
 class DeviceName(StrEnum):
@@ -54,6 +52,21 @@ class ExtractionOptions:
 
 
 @dataclass(frozen=True)
+class EmbeddingEvaluationOptions:
+    """Choose an existing extraction to evaluate.
+
+    Attributes:
+        extraction: Directory containing embeddings, image records, and settings.
+        output: New directory for aggregate and per-query JSON results.
+        batch_size: Maximum query rows per distance block.
+    """
+
+    extraction: Path
+    output: Path
+    batch_size: int = DEFAULT_BATCH_SIZE
+
+
+@dataclass(frozen=True)
 class PreprocessingSettings:
     """Describe the reference resize and channel normalization.
 
@@ -74,7 +87,6 @@ class PreprocessingSettings:
     interpolation: str = "bilinear"
 
 
-# Share one definition so recorded settings agree with the image transform.
 PREPROCESSING = PreprocessingSettings()
 
 
@@ -102,7 +114,23 @@ class ExtractionSettings:
     batch_size: int
     extraction_seconds: float
     preprocessing: PreprocessingSettings = PREPROCESSING
-    model: str = "osnet_x1_0"
-    dtype: str = "float32"
+    model: str = MODEL_NAME
+    dtype: str = EMBEDDING_DTYPE
     embedding_dimensions: int = EMBEDDING_DIM
     feature_normalization: bool = False
+
+    @classmethod
+    def from_mapping(cls, values: Mapping[str, object]) -> Self:
+        """Convert decoded JSON into typed extraction settings.
+
+        The JSON boundary is handled here so consumers can use named attributes
+        instead of repeatedly looking up string keys. Missing, extra, or malformed
+        preprocessing fields raise ``TypeError``.
+        """
+        settings: dict[str, Any] = dict(values)
+        preprocessing = settings.pop("preprocessing")
+        if not isinstance(preprocessing, Mapping):
+            raise TypeError("preprocessing must be a JSON object")
+
+        settings["preprocessing"] = PreprocessingSettings(**dict(preprocessing))
+        return cls(**settings)

@@ -1,8 +1,8 @@
 # COSC594-Biometrics-Project
 
 A person retrieval baseline using pretrained **OSNet-x1.0** models from
-[Torchreid](https://github.com/KaiyangZhou/deep-person-reid). The current command
-extracts embeddings; retrieval, evaluation, and visualization will follow.
+[Torchreid](https://github.com/KaiyangZhou/deep-person-reid). Extract embeddings,
+then evaluate identity retrieval from the saved vectors.
 
 [Market-1501](https://zheng-lab-anu.github.io/Project/project_reid.html) is our
 first baseline dataset. More datasets are planned; the
@@ -29,10 +29,20 @@ Download either or both plain OSNet-x1.0 checkpoints from the
 - [Market-trained](https://drive.google.com/file/d/1vduhq5DpN2q1g4fYEZfPI17MJeh9qyrA/view?usp=sharing): trained on Market-1501.
 - [MSMT17-trained, combineall](https://drive.google.com/file/d/1IosIFlLiulGIjwW3H8uMRmx3MzPwf86x/view?usp=sharing): trained on MSMT17 with combineall.
 
-## Extract embeddings
+## Commands
 
-Extract the query and gallery splits with one local checkpoint. Choose a new
-output directory:
+The saved-embedding workflow runs in two steps:
+
+1. Extract reusable embeddings and image metadata from Market-1501.
+2. Evaluate the saved embeddings and write retrieval metrics.
+
+The commands process one checkpoint at a time. Repeat both steps with separate
+output directories for each checkpoint you want to compare.
+
+### 1. Extract embeddings
+
+Process the standard query and gallery splits with one local checkpoint. The
+output directory must be new:
 
 ```bash
 uv run reid-baseline extract \
@@ -41,24 +51,60 @@ uv run reid-baseline extract \
   --output results/first-extraction
 ```
 
-### Options
+Images are read in filename order, converted to RGB, resized to **256 high × 128
+wide**, and normalized with ImageNet statistics. OSNet produces one
+512-dimensional float32 embedding per image in the same order as the saved
+image records.
 
-- `--device auto|cuda|mps|cpu`: defaults to `auto`, which selects an available
-  accelerator, falling back to CPU.
-- `--batch-size`: defaults to 64 images per batch.
+Extraction automatically uses an available accelerator and otherwise runs on
+CPU.
 
-### Processing
+The extraction directory contains:
 
-1. Read images in filename order, excluding junk identity `-1` and retaining
-   gallery distractor identity `0`.
-2. Convert images to RGB, resize to **256 high × 128 wide**, and apply ImageNet
-   normalization.
-3. Extract 512-dimensional float32 embeddings without feature normalization.
+- `embeddings.npz`: query and gallery float32 arrays with 512 values per row.
+- `images.json`: the dataset location and ordered image paths, identities, and
+  cameras for both splits.
+- `settings.json`: the model, checkpoint path and hash, preprocessing, device,
+  batch size, and extraction time.
 
-### Outputs
+### 2. Evaluate saved embeddings
 
-| File | Contents |
-| --- | --- |
-| `embeddings.npz` | Query and gallery arrays, one image per row |
-| `images.json` | Dataset location, relative image paths, identities, and cameras in embedding order |
-| `settings.json` | Checkpoint path and hash, preprocessing, device, and extraction time |
+Score the extraction above and save results to a new directory:
+
+```bash
+uv run reid-baseline evaluate \
+  --extraction results/first-extraction \
+  --output results/first-evaluation
+```
+
+Evaluation ranks the saved OSNet outputs directly using squared Euclidean
+distance. Distance ties follow gallery filename order.
+
+The evaluation directory contains:
+
+- `metrics.json`: Rank-1/5/10, mAP, and evaluated and skipped query counts.
+- `per-query.json`: AP and the one-based first correct rank for every query, in
+  query order.
+
+Metrics are saved as fractions and printed as percentages. Queries with no
+same-identity gallery image after filtering have `null` AP and first-rank values
+and are excluded from averages.
+
+## Evaluation protocol
+
+The Market-1501 protocol removes junk identity `-1`, retains distractor identity
+`0`, and excludes gallery images with both the query's identity and camera.
+Queries with no remaining same-ID images are reported as skipped.
+
+- **Rank-1/5/10:** fraction of evaluated queries with a correct match in the
+  first 1, 5, or 10 positions.
+- **AP:** precision averaged at each correct match in a query's full ranking.
+- **mAP:** mean AP across evaluated queries.
+
+## Planned work
+
+- Add optional feature normalization.
+- Add re-ranking.
+- Add test-time augmentation during extraction.
+- Consider using a stable distance sort so equal distances preserve gallery
+  filename order.

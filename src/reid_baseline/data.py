@@ -10,6 +10,7 @@ Loading records reads filenames only; image decoding happens during extraction.
 
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 # Standard release counts include junk gallery images, but not the optional 500K extension.
@@ -18,6 +19,16 @@ STANDARD_GALLERY_COUNT = 19732
 
 # Some downloaded Market-1501 files have a repeated .jpg suffix.
 _FILENAME = re.compile(r"(?P<pid>-1|\d{4})_c(?P<camera>[1-6])s\d+_\d+_\d+\.jpg(?:\.jpg)?")
+
+
+class MarketSplit(StrEnum):
+    """Identify a Market-1501 split used by the baseline.
+
+    Each value names the split's folder beneath the dataset root.
+    """
+
+    QUERY = "query"
+    GALLERY = "bounding_box_test"
 
 
 @dataclass(frozen=True)
@@ -97,12 +108,12 @@ def parse_filename(filename: str) -> tuple[int, int]:
     return int(match["pid"]), int(match["camera"])
 
 
-def _read_split(root: Path, folder: str) -> tuple[list[ImageRecord], int]:
+def _read_split(root: Path, split: MarketSplit) -> tuple[list[ImageRecord], int]:
     """Collect the usable records from one split folder.
 
     Args:
         root: Dataset directory used as the base for saved image paths.
-        folder: query or bounding_box_test, relative to root.
+        split: Dataset split whose folder is read relative to root.
 
     Returns:
         Records sorted by filename and the JPEG count before junk filtering.
@@ -112,7 +123,7 @@ def _read_split(root: Path, folder: str) -> tuple[list[ImageRecord], int]:
         ValueError: A filename is malformed, a query has identity 0, or no usable
             records remain.
     """
-    directory = root / folder
+    directory = root / split
     if not directory.is_dir():
         raise FileNotFoundError(
             f"Missing dataset folder: {directory}. "
@@ -127,7 +138,7 @@ def _read_split(root: Path, folder: str) -> tuple[list[ImageRecord], int]:
         # Junk is excluded, but identity 0 remains a gallery distractor.
         if pid == -1:
             continue
-        if folder == "query" and pid == 0:
+        if split is MarketSplit.QUERY and pid == 0:
             raise ValueError(f"Query must have a known person identity: {path}")
 
         # Relative paths let a caller resolve all images from one dataset root.
@@ -154,6 +165,6 @@ def load_market1501(root: Path) -> Market1501:
         ValueError: A split contains invalid labels or no usable records.
     """
     root = root.expanduser().resolve()
-    queries, query_count = _read_split(root, "query")
-    gallery, gallery_count = _read_split(root, "bounding_box_test")
+    queries, query_count = _read_split(root, MarketSplit.QUERY)
+    gallery, gallery_count = _read_split(root, MarketSplit.GALLERY)
     return Market1501(root, queries, gallery, query_count, gallery_count)

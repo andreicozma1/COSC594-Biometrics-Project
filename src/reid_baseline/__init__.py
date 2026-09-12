@@ -1,6 +1,5 @@
-"""Extract person embeddings from Market-1501 with local OSNet checkpoints.
+"""Person retrieval with local OSNet checkpoints and Market-1501 images.
 
-Modules:
-    data reads the image records, model performs inference, and results saves
-    the arrays and metadata. cli connects those steps to the extract command.
+Extract embeddings once, then evaluate the saved vectors against the gallery
+using the Market-1501 retrieval protocol.
 """

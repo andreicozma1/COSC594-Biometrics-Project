@@ -1,22 +1,25 @@
-"""Write the files needed to reuse an extraction.
+"""Save extracted vectors and evaluate them using aligned image records.
 
-Outputs:
-    embeddings.npz: Query and gallery arrays in their original record order.
-    images.json: Dataset root, relative image paths, and identity/camera labels.
-    settings.json: Checkpoint and inference settings; written after the arrays.
-
-Files are created exclusively. A failed write may leave partial output.
+Extraction writes arrays, image metadata, and settings. Evaluation reads those
+files and writes aggregate and per-query results as JSON.
 """
 
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .configuration import EMBEDDING_DIM, ExtractionSettings
-from .data import ImageRecord, Market1501
+from .configuration import (
+    EMBEDDING_DIM,
+    EMBEDDING_DTYPE,
+    MODEL_NAME,
+    ExtractionSettings,
+)
+from .data import ImageRecord, Market1501, MarketSplit, parse_filename
+from .evaluation import Evaluation
 
 
 @dataclass(frozen=True)
@@ -74,20 +77,9 @@ def save_embeddings(
         Writes images.json, embeddings.npz, then settings.json. A failed write
         can leave earlier files in place; retry in a new directory.
     """
-    # Validate both splits before writing either one, with the failing split named.
-    for split, features, records in (
-        ("Query", query, dataset.queries),
-        ("Gallery", gallery, dataset.gallery),
-    ):
-        expected_shape = (len(records), EMBEDDING_DIM)
-        if features.shape != expected_shape:
-            raise ValueError(
-                f"{split} embeddings have shape {features.shape}; expected {expected_shape}."
-            )
-        if features.dtype != np.float32:
-            raise ValueError(f"{split} embeddings have dtype {features.dtype}; expected float32.")
-        if not np.isfinite(features).all():
-            raise ValueError(f"{split} embeddings contain NaN or infinity.")
+    # Validate both splits before writing either one, naming the failing split.
+    _validate_saved_embeddings(query, len(dataset.queries), "Query")
+    _validate_saved_embeddings(gallery, len(dataset.gallery), "Gallery")
 
     # Serialize both records first so invalid settings cannot leave earlier files behind.
     metadata = ImageMetadata(str(dataset.root), dataset.queries, dataset.gallery)
@@ -103,3 +95,141 @@ def save_embeddings(
     # An array-write failure must not leave a settings file suggesting the run finished.
     with (directory / "settings.json").open("x") as handle:
         handle.write(settings_json)
+
+
+def _read_records(rows: list[dict[str, Any]], split: MarketSplit) -> list[ImageRecord]:
+    """Decode image records and check their saved path and label conventions.
+
+    Returns:
+        Nonempty, unique records sorted by filename. Paths must name an image
+        directly inside the expected split folder.
+
+    Raises:
+        ValueError: Paths, filename labels, identities, or ordering disagree.
+    """
+    records = [ImageRecord(**row) for row in rows]
+    for item in records:
+        path = Path(item.path)
+        if path.parts != (split.value, path.name):
+            raise ValueError(f"Invalid saved image path: {item.path}")
+        if parse_filename(item.filename) != (item.pid, item.camera):
+            raise ValueError(f"Saved image labels disagree with filename: {item.filename}")
+        if item.pid < 0 or (split is MarketSplit.QUERY and item.pid == 0):
+            raise ValueError(f"Invalid saved identity: {item.filename}")
+    # Metadata order is the only link between an image and its saved vector row.
+    names = [item.filename for item in records]
+    if not records or names != sorted(set(names)):
+        raise ValueError(f"Saved {split.value} records must be nonempty, unique, and sorted.")
+    return records
+
+
+def _validate_saved_embeddings(features: np.ndarray, count: int, split: str) -> None:
+    """Check the saved OSNet array format before writing or reusing vectors.
+
+    Args:
+        features: Array to validate; its contents are never changed.
+        count: Number of image records the rows must match.
+        split: Query or Gallery, included in errors to identify the affected input.
+
+    Raises:
+        ValueError: Shape, dtype, or values violate the finite float32 [N, 512] format.
+    """
+    expected_shape = (count, EMBEDDING_DIM)
+    if features.shape != expected_shape:
+        raise ValueError(
+            f"{split} embeddings have shape {features.shape}; expected {expected_shape}."
+        )
+    if features.dtype != np.float32:
+        raise ValueError(f"{split} embeddings have dtype {features.dtype}; expected float32.")
+    if not np.isfinite(features).all():
+        raise ValueError(f"{split} embeddings contain NaN or infinity.")
+
+
+def _load_embeddings(
+    directory: Path,
+    queries: list[ImageRecord],
+    gallery: list[ImageRecord],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Load saved vectors and check alignment with the image records.
+
+    Returns:
+        Query and gallery float32 matrices, in that order. Invalid shape,
+        dtype, or values raise ValueError before the arrays are returned.
+    """
+    with np.load(directory / "embeddings.npz", allow_pickle=False) as data:
+        query_features, gallery_features = data["query"], data["gallery"]
+    _validate_saved_embeddings(query_features, len(queries), "Query")
+    _validate_saved_embeddings(gallery_features, len(gallery), "Gallery")
+
+    return query_features, gallery_features
+
+
+@dataclass(frozen=True)
+class SavedExtraction:
+    """Pair saved embeddings with the image labels used during extraction.
+
+    Each array row corresponds to the record at the same position. Reading an
+    extraction requires no checkpoint or original image files.
+    """
+
+    queries: list[ImageRecord]
+    gallery: list[ImageRecord]
+    query_features: NDArray[np.float32]
+    gallery_features: NDArray[np.float32]
+
+
+def load_extraction(directory: Path) -> SavedExtraction:
+    """Load the three files written by the extract command.
+
+    Args:
+        directory: Extraction directory, with a leading tilde expanded.
+
+    Returns:
+        Image labels and finite float32 embedding matrices in saved row order.
+
+    Raises:
+        ValueError: Files are missing, malformed, or inconsistent with the
+            extraction format. Original image paths are not opened.
+    """
+    directory = directory.expanduser().resolve()
+    try:
+        # Settings are written last by extract; require them before using the arrays.
+        settings_data = json.loads((directory / "settings.json").read_text())
+        if not isinstance(settings_data, dict):
+            raise ValueError("Extraction settings must be a JSON object.")
+        settings = ExtractionSettings.from_mapping(settings_data)
+        if (
+            settings.model != MODEL_NAME
+            or settings.dtype != EMBEDDING_DTYPE
+            or settings.embedding_dimensions != EMBEDDING_DIM
+            or settings.feature_normalization is not False
+        ):
+            raise ValueError("Expected unnormalized float32 OSNet-x1.0 extraction settings.")
+
+        metadata = json.loads((directory / "images.json").read_text())
+        queries = _read_records(metadata["query"], MarketSplit.QUERY)
+        gallery = _read_records(metadata["gallery"], MarketSplit.GALLERY)
+        query_features, gallery_features = _load_embeddings(directory, queries, gallery)
+        return SavedExtraction(queries, gallery, query_features, gallery_features)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ValueError(f"Cannot read extraction {directory}: {error}") from error
+
+
+def save_metrics(directory: Path, evaluation: Evaluation) -> None:
+    """Write aggregate and per-query results as JSON.
+
+    Args:
+        directory: Existing directory; metrics.json and per-query.json must be new.
+        evaluation: Metric fractions and query results in input order.
+
+    Skipped queries have null AP and first_match_rank values. Serialization is
+    completed before either file is opened; I/O errors may leave partial output.
+    """
+    metrics_json = json.dumps(asdict(evaluation.metrics), indent=2, allow_nan=False) + "\n"
+    queries_json = json.dumps(
+        [asdict(result) for result in evaluation.queries], indent=2, allow_nan=False
+    ) + "\n"
+    with (directory / "metrics.json").open("x") as handle:
+        handle.write(metrics_json)
+    with (directory / "per-query.json").open("x") as handle:
+        handle.write(queries_json)
